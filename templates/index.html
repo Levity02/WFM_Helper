@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WFM Helper - {{ profile.username if profile.username != "Guest" else "Login" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo-area">
+            <img src="{{ url_for('static', filename='images/wfm_logo.png') }}" alt="Warframe Market Logo" class="logo-img">
+        </div>
+        <div class="top-bar-right-content">
+            <nav class="top-nav-links">
+                <a href="javascript:void(0);" id="help-faq-link" class="nav-link-resource"><i class="fas fa-question-circle"></i> Help/FAQ</a>
+                <a href="https://wiki.warframe.com/" target="_blank" class="nav-link-resource"><i class="fas fa-book"></i> Wiki</a>
+                <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=666483447" target="_blank" class="nav-link-simaris">
+                    <img src="{{ url_for('static', filename='images/simaris_icon.png') }}" alt="Simaris" class="custom-nav-icon"> Simaris Guide
+                </a>
+                <a href="{{ market_base_url }}/" target="_blank" class="nav-link-market"><i class="fas fa-shopping-cart"></i> Market</a>
+                <a href="{{ auctions_url }}" target="_blank" class="nav-link-contracts"><i class="fas fa-handshake"></i> Contracts</a>
+            </nav>
+            <div class="user-actions-group">
+                {% if current_jwt_exists and profile.username != "Guest" %}
+                <a href="{{ profile.profile_url }}" target="_blank" class="user-action-link nav-link-profile"><i class="fas fa-user"></i> My Profile</a>
+                <a href="{{ market_base_url }}/im/chats" target="_blank" class="user-action-link nav-link-messages"><i class="fas fa-envelope"></i> My Messages</a>
+                <div class="profile-snippet">
+                    <img src="{{ profile.avatar_url }}" alt="{{ profile.username }} avatar" class="avatar-small">
+                    <div class="profile-snippet-text">
+                        <span class="username">{{ profile.username }}</span>
+                        <div class="status-container">
+                            <span id="current-status-display" class="status {{ profile.status.lower().replace(' ', '-') if profile.status else 'invisible' }}">
+                                {{ profile.status if profile.status else 'Invisible' }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <span class="auth-prompt-nav">Login Required</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="banner-profile-overlap-container">
+        <div class="banner-div" style="background-image: url('{{ url_for('static', filename=banner_image_file_path) if banner_image_file_path else '' }}'); {% if not banner_image_file_path %}background-color: #101619;{% endif %}">
+            {% if not banner_image_file_path %}
+            <div class="banner-fallback"><p>Banner image not found.</p></div>
+            {% endif %}
+        </div>
+
+        <div class="main-content-wrapper container">
+            <div class="profile-header">
+                <div class="profile-header-avatar">
+                    <img src="{{ profile.avatar_url }}" alt="{{ profile.username }} avatar" class="avatar-large">
+                    <span id="main-profile-status-display" class="status-large {{ profile.status.lower().replace(' ', '-') if profile.status else 'invisible' }}">{{ profile.status if profile.status else 'Invisible' }}</span>
+                </div>
+                <div class="profile-header-info">
+                    <h1>{{ profile.username if profile.username != "Guest" else "Not Logged In" }}</h1>
+                    {% if current_jwt_exists and profile.username != "Guest" %}
+                    <div class="profile-stats">
+                        {% if profile.reputation is defined %}<span>+{{ profile.reputation }} REPUTATION</span>{% endif %}
+                        <span id="visible-orders-count-display">{{ profile.visible_orders_count }} VISIBLE ORDERS</span>
+                        <span id="total-listings-count-display">{{ profile.total_listings_count }} TOTAL LISTINGS</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if auth_error %}
+            <div class="auth-error-message"><p><i class="fas fa-exclamation-triangle"></i> {{ auth_error }}</p></div>
+            {% endif %}
+
+            <div class="content-tabs">
+                <div class="tabs-left"><button class="tab-link active">ORDERS</button></div>
+                <div class="tabs-right">
+                    {% if current_jwt_exists %}
+                    <button id="toggle-processing-btn" data-processing-active="{{ 'true' if is_processing else 'false' }}">
+                        {{ 'Stop Processing' if is_processing else 'Start Processing' }}
+                    </button>
+                    {% endif %}
+                    <button id="console-output-toggle">Hide Script Log</button>
+                    <button id="toggle-hidden-items-btn">Hide Hidden Listings</button>
+                    <button id="place-order-main-btn" class="btn-action-place-order" {% if not current_jwt_exists %}disabled{% endif %}><i class="fas fa-plus-square"></i> Place Order</button>
+                </div>
+            </div>
+            <div id="console-output-area" style="display: block;"><pre>Script log will appear here...</pre></div>
+            <div id="action-message-area" style="text-align: center; margin-bottom: 10px; min-height: 20px; font-weight: bold;"></div>
+
+            {% if current_jwt_exists %}
+            <div class="orders-section">
+                <div class="order-controls"></div>
+                <div class="item-list"> <div class="item-entry item-headers">
+                        <span class="item-status-header">Status</span><span class="item-thumbnail-header"></span>
+                        <span class="item-name-header">Name</span><span class="item-details-header"></span> <span class="item-price-header">Your Price / Min</span><span class="item-competitor-header">Lowest Competitor</span>
+                        <span class="item-actions-header">Actions</span>
+                    </div>
+                    {% if sell_orders %}
+                        {% for order in sell_orders %}
+                        <div class="item-entry {% if not order.visible %}item-is-actually-hidden{% endif %}"
+                             id="row-item-{{ order.item_id }}"
+                             data-item-id="{{ order.item_id if order.item_id else '' }}"
+                             data-order-id="{{ order.order_id if order.order_id else '' }}"
+                             data-rank="{{ order.rank if order.rank is not none else '' }}">
+                            <div class="item-status-cell"><span class="status-text {% if not order.visible %}status-text-hidden{% endif %}">{{ order.initial_status_text }}</span></div>
+                            <div class="item-thumbnail"><img src="{{ order.icon_url if order.icon_url else url_for('static', filename='images/item_placeholder.png') }}" alt="{{ order.item_name }}"></div>
+                            <div class="item-name-details">
+                                <a href="{{ market_base_url }}/items/{{ order.item_slug if order.item_slug else '#' }}" target="_blank" class="item-name-link">{{ order.item_name }}</a>
+                                <span class="item-rank">Rank: {{ order.rank if order.rank is not none else 'N/A' }}{% if order.mod_max_rank is not none %} of {{ order.mod_max_rank }}{% endif %}</span>
+                            </div>
+                            <div class="item-quantity">Qty: <input type="number" value="{{ order.quantity }}" class="quantity-input" data-order-id="{{ order.order_id if order.order_id else '' }}" data-item-id="{{ order.item_id if order.item_id else '' }}" min="0"></div>
+                            <div class="item-price">
+                                <div><input type="number" value="{{ order.platinum }}" class="price-input current-price-input" data-order-id="{{ order.order_id if order.order_id else '' }}" {% if not order.is_skipped %}readonly{% endif %}> Current Price</div>
+                                <div>
+                                    <input type="text"
+                                           value="{{ order.numeric_min_price if order.numeric_min_price is not none else '' }}"
+                                           placeholder="{{ 'Skipped (' + (order.numeric_min_price|string if order.numeric_min_price is not none else 'No min') + 'p)' if order.is_skipped else 'Set Min (or skip)' }}"
+                                           class="price-input min-price-input"
+                                           data-item-id="{{ order.item_id if order.item_id else '' }}"
+                                           data-last-numeric-value="{{ order.numeric_min_price if order.numeric_min_price is not none else '' }}"
+                                           {% if order.is_skipped %}disabled{% endif %}
+                                           > Minimum Price
+                                </div>
+                            </div>
+                            <div class="item-competitor-price" data-item-id="{{ order.item_id if order.item_id else '' }}">{{ order.competitor_price if order.competitor_price else 'N/A' }}</div>
+                            <div class="item-actions">
+                                <button class="action-btn item-action-sold" data-order-id="{{ order.order_id if order.order_id else '' }}" data-item-id="{{ order.item_id if order.item_id else '' }}" title="Decrement Quantity by 1" {% if order.quantity == 0 or order.quantity == 1 %}disabled{% endif %}><i class="fas fa-minus-circle"></i> Sold 1</button>
+                                <button class="action-btn item-action-plus-one" data-order-id="{{ order.order_id if order.order_id else '' }}" data-item-id="{{ order.item_id if order.item_id else '' }}" title="Increment Quantity by 1"><i class="fas fa-plus-circle"></i> +1</button>
+                                {% if order.visible %}
+                                <button class="action-btn action-btn-visible item-action-toggle-visibility" data-order-id="{{ order.order_id if order.order_id else '' }}" data-item-id="{{ order.item_id if order.item_id else '' }}" data-current-visibility="true" title="Mark as Hidden"><i class="fas fa-eye"></i> Visible</button>
+                                {% else %}
+                                <button class="action-btn action-btn-hidden item-action-toggle-visibility" data-order-id="{{ order.order_id if order.order_id else '' }}" data-item-id="{{ order.item_id if order.item_id else '' }}" data-current-visibility="false" title="Mark as Visible"><i class="fas fa-eye-slash"></i> Hidden</button>
+                                {% endif %}
+                                <label class="skip-label" title="Skip auto-repricing">Skip: <input type="checkbox" class="skip-checkbox" data-item-id="{{ order.item_id if order.item_id else '' }}" {% if order.is_skipped %}checked{% endif %}></label>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+                </div> <p class="no-orders-message" style="display: {% if not sell_orders %}block{% else %}none{% endif %};">
+                    {% if current_jwt_exists %}No sell orders to display.{% else %}Please authenticate to see your orders.{% endif %}
+                </p>
+            </div>
+            {% endif %}
+
+            <div id="jwt-manual-entry-section" class="controls-footer" style="display: {% if auth_error and not current_jwt_exists %}flex{% else %}none{% endif %};">
+                <form id="jwt-form" style="display: flex; width: 100%;"><input type="password" id="manual-jwt-input" name="manual_jwt_token" placeholder="Paste JWT if needed" style="flex-grow: 1;"><button type="submit" id="submit-jwt-btn">Submit JWT</button></form>
+            </div>
+            <div id="jwt-message" style="margin-top:10px; text-align: center;"></div>
+        </div>
+    </div>
+
+    <div id="faq-modal-overlay" class="modal-overlay">
+        <div id="faq-modal-content" class="modal-content">
+            <button id="faq-modal-close" class="modal-close-btn">&times;</button>
+            <h2><i class="fas fa-question-circle"></i> WFM Helper - Help & FAQ</h2>
+
+            <h4>1. Introduction: What is WFM Helper?</h4>
+            <p>WFM Helper is a web-based tool designed to streamline managing your item listings on Warframe.Market. It provides a user interface to view your current sell orders, set individual pricing strategies (minimum price and skip options), and automate the process of repricing your items to stay competitive. It can also "bump" your listings to improve their visibility if they are already optimally priced.</p>
+            <p>This tool communicates with Warframe.Market on your behalf, requiring authentication via a JWT (JSON Web Token).</p>
+
+            <h4>2. Getting Started: Authentication</h4>
+            <p>To use WFM Helper, you need to be authenticated with Warframe.Market.</p>
+            <ul>
+                <li><strong>Automatic JWT Fetch:</strong> The application will attempt to automatically fetch your JWT from Mozilla Firefox browser cookies if you are logged into Warframe.Market there. This is the easiest way to get started.</li>
+                <li><strong>Manual JWT Input:</strong> If auto-fetch fails, or you use a different browser, you'll see a field at the bottom of the page to manually paste your JWT.
+                    <ul>
+                        <li>To get your JWT: Log in to Warframe.Market, then open your browser's developer tools (usually F12), go to the 'Storage' (Firefox) or 'Application' (Chrome) tab, find Cookies for `warframe.market`, and copy the value of the `JWT` cookie.</li>
+                        <li><strong>Important:</strong> Your JWT is sensitive information. Treat it like a password. This application stores it temporarily in your browser session for its operations and does not save it anywhere else persistently on a server. The Device ID, also used for authentication, is stored in `config.json` locally.</li>
+                    </ul>
+                </li>
+            </ul>
+            <p>Once authenticated, your Warframe.Market username, avatar, status, and reputation should appear at the top of the page.</p>
+            <h4>3. Main Interface Explained</h4>
+            <p>The main page is divided into several key sections:</p>
+            <ul>
+                <li><strong>Profile Overview (Top Banner):</strong> Displays your in-game name, avatar, current Warframe.Market status (Online, Online In Game, Invisible), reputation, and counts of your visible and total listings.</li>
+                <li><strong>Control Buttons (Under Tabs):</strong>
+                    <ul>
+                        <li><strong>Start/Stop Processing:</strong> Initiates or halts the automatic price analysis and update script.</li>
+                        <li><strong>Hide/Show Script Log:</strong> Toggles the visibility of the script log area.</li>
+                        <li><strong>Hide/Show Hidden Listings:</strong> Toggles whether items marked as "Hidden" on Warframe.Market are displayed in the table below.</li>
+                        <li><strong>Place Order:</strong> Opens a modal to create a new sell listing on Warframe.Market.</li>
+                    </ul>
+                </li>
+                <li><strong>Script Log:</strong> A scrollable area that shows real-time messages from the backend processing script, including analysis steps, price changes, bumps, errors, and status updates. This is your primary source for understanding what the tool is doing.</li>
+                <li><strong>Item Listings Table:</strong> This is where all your current sell orders are displayed with comprehensive details. Each row represents one listing.
+                    <ul>
+                        <li><strong>Status (Column):</strong> Shows the latest action or status message from the processing script for that specific item (e.g., "Idle", "Price Updated", "Skipped", "Error: Min Price Missing").</li>
+                        <li><strong>Thumbnail & Name:</strong> Item icon and clickable name linking to its Warframe.Market page. Rank is also displayed here.</li>
+                        <li><strong>Qty (Quantity):</strong> Your current listed quantity. You can directly edit this number, or use the "+1" / "Sold 1" buttons.</li>
+                        <li><strong>Your Price / Min (Column):</strong>
+                            <ul>
+                                <li><em>Current Price:</em> Your item's current price on Warframe.Market. <strong>This field becomes editable if the item is "skipped" from auto-repricing.</strong></li>
+                                <li><em>Minimum Price Input:</em> Set your desired minimum selling price here. The script will not price below this. You can also type "skip" or use the checkbox.</li>
+                            </ul>
+                        </li>
+                        <li><strong>Lowest Competitor:</strong> Shows the lowest price from other 'in-game' PC sellers for that item. "N/A" if no competitors are found or an error occurs.</li>
+                        <li><strong>Actions (Buttons & Checkbox):</strong>
+                            <ul>
+                                <li><em>Sold 1:</em> Decrements quantity by 1. Disabled if quantity is 1 or 0.</li>
+                                <li><em>+1:</em> Increments quantity by 1.</li>
+                                <li><em>Visible/Hidden Toggle:</em> Changes the listing's visibility on Warframe.Market.</li>
+                                <li><em>Skip Checkbox:</em> Excludes this item from automatic repricing. <strong>If checked, the "Current Price" field for this item becomes editable.</strong></li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+
+            <h4>4. Core Features in Detail</h4>
+            <h5>a. Managing Your Listings (Minimum Price & Skip Status)</h5>
+            <p>For each item in your listings table, you can define a pricing strategy for the automation script:</p>
+            <ul>
+                <li><strong>Setting a Numeric Minimum Price:</strong> In the "Minimum Price" input field for an item, type the lowest platinum value you're willing to sell it for. This must be a positive whole number (e.g., 10). The script will never automatically price your item below this value.</li>
+                <li><strong>Skipping an Item:</strong>
+                    <ul>
+                        <li>Check the "Skip" checkbox to the right of the actions.</li>
+                        <li>Alternatively, you can type the word "skip" (case-insensitive) into the "Minimum Price" input field for that item.</li>
+                    </ul>
+                    When an item is skipped, its "Minimum Price" input field (for auto-repricing) will be disabled, and its placeholder will indicate "Skipped". The script will ignore this item during its analysis and update cycles. If you uncheck "Skip", the "Minimum Price" input field will be re-enabled, and if it previously held a numeric value, that value will be restored.
+                </li>
+                <li><strong>Manually Setting Price for Skipped Items:</strong> If an item is marked as "skipped" (either by the checkbox or by typing "skip" into the minimum price field), its "Current Price" field (the one showing its actual listing price on WFM) becomes editable. You can type a new price and press Enter or click away. This will directly attempt to update the item's price on Warframe.Market. This is useful if you want full manual control over a specific item's price while others are automated.</li>
+                <li><strong>Saving Settings:</strong> Per-item settings for auto-repricing (numeric minimum and skip status) are automatically saved to a `config.json` file locally whenever you make a change. This ensures your preferences are remembered for future sessions. Manually changed current prices for skipped items are updated directly on WFM and are not stored as part of these specific app settings in `config.json` (the app reads the current live price from WFM).</li>
+            </ul>
+            <p><strong>Crucial:</strong> These settings are fundamental for the "Start Processing" feature.</p>
+
+            <h5>b. Automatic Repricing & Bumping (The "Start Processing" Magic)</h5>
+            <p>When you click the "Start Processing" button (and you're authenticated, and all visible items have valid settings):</p>
+            <ol>
+                <li>The backend script begins a cycle. It first fetches your current orders from Warframe.Market.</li>
+                <li>It then iterates through your <strong>visible</strong> sell orders that are <strong>not marked as "skipped"</strong> and <strong>have a valid numeric minimum price set</strong>.</li>
+                <li>For each eligible item, it fetches competitor prices from Warframe.Market (specifically looking at other "in-game" sellers on PC).</li>
+                <li><strong>Price Analysis & Update:</strong>
+                    <ul>
+                        <li>If competitors exist, it determines the lowest competitor price.</li>
+                        <li>It calculates a target price, which is 1 platinum less than the lowest competitor (e.g., if lowest is 15p, target is 14p).</li>
+                        <li>This target price will <strong>not go below your set numeric minimum price</strong>. If undercutting would go below your minimum, your item will be priced at your minimum.</li>
+                        <li>If your current price needs adjustment (up or down) to meet this target, the script updates your listing on Warframe.Market.</li>
+                    </ul>
+                </li>
+                <li><strong>Bumping:</strong> If your item's price is already optimal (i.e., it's correctly undercutting or at your minimum and no cheaper competitor exists), the script tracks how many cycles it has remained in this state. After a configurable number of cycles (default is 5), if the item is still optimally priced and you are not being undercut, the script may "bump" your listing. This means re-listing it at the same price, which can improve its visibility on Warframe.Market as it appears more recent.</li>
+                <li>The script sends detailed log messages about its actions (item being analyzed, competitor prices, price changes, bumps, errors) to the "Script Log" area in real-time.</li>
+                <li>After processing all eligible items, the script waits for a defined delay (e.g., 10-15 seconds) and then starts a new cycle.</li>
+            </ol>
+            <p>To stop this process, click the "Stop Processing" button. The script will finish its current action or cycle and then halt.</p>
+
+            <h5>c. Placing New Orders</h5>
+            <p>You can add new sell listings to Warframe.Market using the "Place Order" button:</p>
+            <ol>
+                <li>Click "Place Order". A modal window will appear.</li>
+                <li><strong>Item Name:</strong> Start typing the name of the item. An autocomplete list will help you find and select the exact item. This is crucial for correct listing.</li>
+                <li><strong>Price (Platinum):</strong> Enter the price you want to list the item for. Must be a positive number.</li>
+                <li><strong>Quantity:</strong> Enter how many units you are selling. Must be a positive number (defaults to 1).</li>
+                <li><strong>Rank (if applicable):</strong> For mods or other rankable items, enter the rank (e.g., 0 for unranked, 5 for a rank 5 mod). If the item has a known max rank, it will be displayed as a hint. Defaults to 0.</li>
+                <li><strong>Optional App Settings:</strong>
+                    <ul>
+                        <li><em>Minimum Price (for auto-reprice):</em> You can pre-set the numeric minimum price for this new listing for the WFM Helper app's auto-repricing logic.</li>
+                        <li><em>Skip auto-reprice for this item:</em> Check this if you want this new listing to be automatically skipped by the processing script once it's live.</li>
+                    </ul>
+                    These app-specific settings will be saved to your `config.json`.
+                </li>
+                <li>Click "Submit Order". The tool will attempt to post this new listing to Warframe.Market. You'll receive feedback in the modal and in the main script log.</li>
+            </ol>
+            <h5>d. Manual Adjustments (Quantity & Visibility from the Table)</h5>
+            <p>You can make quick changes to your existing listings directly from the table:</p>
+            <ul>
+                <li><strong>Quantity Input:</strong> Click into the number in the "Qty" column and type a new quantity. Press Enter or click away to submit the change. Setting quantity to 0 will usually cause WFM to hide the listing.</li>
+                <li><strong>"Sold 1" Button:</strong> Decrements the quantity by 1. This button is disabled if the current quantity is 1, as quantity cannot be reduced below 1 using this button. If decrementing results in 0 quantity, the listing will likely become hidden on WFM.</li>
+                <li><strong>"+1" Button:</strong> Increments the quantity by 1.</li>
+                <li><strong>"Visible" / "Hidden" Button:</strong> Toggles your listing's visibility on Warframe.Market. Useful for temporarily taking items off the market without deleting them.</li>
+            </ul>
+            <p>All these actions communicate directly with Warframe.Market to update your live listing.</p>
+
+            <h4>5. Important Notes & Limitations</h4>
+            <ul>
+                <li><strong>Online Status Control:</strong> This application <strong>displays</strong> your current Warframe.Market online status (e.g., "Online In Game", "Online", "Invisible"). It <strong>does not control or change</strong> this status. Your status is determined by your activity on the Warframe.Market website itself or through the official Warframe game client if you have status tracking enabled there.</li>
+                <li><strong>Auto-Processing Pre-requisite:</strong> For the "Start Processing" feature to run, <strong>all your currently VISIBLE sell orders must have either a valid numeric minimum price set (a number > 0) or be explicitly marked with the "Skip" checkbox.</strong> If even one visible item doesn't meet this, the script will notify you and refuse to start.</li>
+                <li><strong>Quantity Management:</strong>
+                    <ul>
+                        <li>The "Sold 1" button is disabled when an item's quantity is 1. You cannot use this button to reduce quantity to 0.</li>
+                        <li>You <em>can</em> set an item's quantity to 0 using the direct quantity input field in the table. This will update the listing on Warframe.Market, and listings with 0 quantity are typically hidden from public view on WFM (they are not "deleted" and can be made visible again by increasing quantity).</li>
+                    </ul>
+                </li>
+                <li><strong>Deleting Listings from Warframe.Market:</strong> Currently, this application does not offer a one-click "Delete Listing Permanently" button for individual items in the main table. To effectively remove a listing from being publicly visible, you can set its quantity to 0 or mark it as "Hidden". The backend has deletion capabilities, but it's not exposed per-item in the UI.</li>
+                <li><strong>Browser for JWT Auto-Fetch:</strong> Automatic fetching of your JWT is currently only supported for Mozilla Firefox. If you use other browsers (Chrome, Edge, etc.), you will need to obtain and paste the JWT manually.</li>
+                <li><strong>API Rate Limiting:</strong> The application incorporates small, mandatory delays between making requests to Warframe.Market (e.g., when fetching competitor prices, updating your listings). This is to ensure responsible use of their API and prevent your access from being restricted. This means actions aren't instantaneous but are queued and processed respectfully.</li>
+                <li><strong>Local Configuration:</strong> Your item-specific settings (numeric minimums, skip statuses), your WFM User ID, and a unique Device ID for API communication are stored in a `config.json` file located in the same folder as the application. Your JWT is *not* stored in this file; it's held in your browser's session storage temporarily while the app is open.</li>
+                <li><strong>Single Instance:</strong> It's generally recommended to run only one instance of this application (or any similar market tool that actively manages your orders) at a time to avoid conflicting instructions being sent to Warframe.Market.</li>
+            </ul>
+
+            <h4>6. Basic Troubleshooting</h4>
+            <ul>
+                <li><strong>Authentication Failed / "Not Authenticated":</strong>
+                    <ul>
+                        <li>If using Firefox, ensure you are logged into Warframe.Market in an active tab.</li>
+                        <li>Try manually pasting your JWT. Double-check you copied the entire correct value.</li>
+                        <li>A "Device ID" error might indicate an issue with the `config.json` or a problem on WFM's side; often resolved by restarting the app or trying again later.</li>
+                    </ul>
+                </li>
+                <li><strong>"Start Processing" Button Doesn't Work or Gives an Error:</strong>
+                    <ul>
+                        <li>The most common reason is that one or more of your <strong>visible</strong> listings does not have a valid numeric minimum price set or is not marked to be skipped. Check the main table carefully. The script log should indicate which items are problematic.</li>
+                        <li>Ensure you are properly authenticated (JWT is valid).</li>
+                    </ul>
+                </li>
+                <li><strong>An Item Isn't Being Repriced/Bumped:</strong>
+                    <ul>
+                        <li>Verify the item is marked as "Visible" in the table.</li>
+                        <li>Ensure its "Skip" checkbox is <strong>unchecked</strong>.</li>
+                        <li>Confirm it has a valid <strong>numeric</strong> minimum price set (not blank, not zero, not text other than "skip").</li>
+                        <li>Check the script log for messages related to that specific item. It might be providing a reason (e.g., "No other in-game sellers found," "Price is optimal," "Waiting for bump threshold").</li>
+                    </ul>
+                </li>
+                <li><strong>"Error updating..." or "Failed to fetch..." messages:</strong> These usually indicate temporary network issues or problems reaching the Warframe.Market API. Often, trying the action again after a short wait resolves it. Check the script log for more details from the API if available.</li>
+            </ul>
+            <hr>
+            <p><em>WFM Helper is a tool to assist with market activities. Always monitor its actions and ensure your listings align with your trading goals. Happy trading, Tenno!</em></p>
+
+        </div>
+    </div>
+
+    <div id="place-order-modal-overlay" class="modal-overlay">
+        <div id="place-order-modal-content" class="modal-content">
+            <button id="place-order-modal-close-btn" class="modal-close-btn">&times;</button>
+            <h2><i class="fas fa-plus-square" style="color: #B53600;"></i> Place New Sell Order</h2>
+            <form id="place-order-form">
+                <div class="place-order-form-row">
+                    <label for="place-order-item-name" class="modal-label">Item Name:</label>
+                    <div class="modal-input-group">
+                        <input type="text" id="place-order-item-name" list="item-names-datalist" placeholder="Start typing item name..." required>
+                        <datalist id="item-names-datalist">
+                        </datalist>
+                        <input type="hidden" id="place-order-item-id" name="item_id">
+                    </div>
+                </div>
+
+                <div class="place-order-form-row form-inline-group-modal">
+                    <div class="modal-input-group-inline">
+                        <label for="place-order-price" class="modal-label">Price (Plat):</label>
+                        <input type="number" id="place-order-price" name="price" placeholder="e.g., 10" min="1" required>
+                    </div>
+                    <div class="modal-input-group-inline">
+                        <label for="place-order-quantity" class="modal-label">Quantity:</label>
+                        <input type="number" id="place-order-quantity" name="quantity" value="1" min="1" required>
+                    </div>
+                </div>
+
+                <div class="place-order-form-row">
+                    <label for="place-order-rank" class="modal-label">Rank (if applicable):</label>
+                    <div class="modal-input-group">
+                        <input type="number" id="place-order-rank" name="rank" value="0" min="0">
+                        <div id="selected-item-max-rank-info" class="modal-input-hint"></div>
+                    </div>
+                </div>
+                
+                <hr class="modal-hr">
+                <h3 class="modal-subheader">Optional App Settings:</h3>
+
+                <div class="place-order-form-row">
+                    <label for="place-order-min-price" class="modal-label">Min Price (Auto-Reprice):</label>
+                    <input type="number" id="place-order-min-price" name="app_min_price" placeholder="e.g., 5" min="1">
+                </div>
+
+                <div class="place-order-form-row place-order-checkbox-row">
+                    <label for="place-order-skip-reprice" class="modal-label">Skip Auto-Reprice:</label>
+                    <input type="checkbox" id="place-order-skip-reprice" name="app_skip_reprice" class="modal-checkbox">
+                </div>
+                
+                <div id="place-order-modal-message" style="display: none; margin-top: 15px;"></div>
+
+                <div class="place-order-modal-actions">
+                    <button type="button" id="place-order-modal-cancel-btn">Cancel</button>
+                    <button type="submit" id="place-order-modal-submit-btn">Submit Order</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    // items_for_autocomplete should be available here if passed correctly from Flask
+    const ITEMS_FOR_AUTOCOMPLETE = JSON.parse('{{ items_for_autocomplete | default("[]") | safe }}');
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // MODIFIED: Updated version log for clarity
+        console.log("DOM fully loaded and parsed. Initializing WFM Helper UI script (v14.2 - Editable Skipped Price).");
+
+        const actionMessageArea = document.getElementById('action-message-area');
+        const consoleOutputArea = document.getElementById('console-output-area');
+        const consolePre = consoleOutputArea ? consoleOutputArea.querySelector('pre') : null;
+        const consoleToggleBtn = document.getElementById('console-output-toggle');
+        const toggleProcessingBtn = document.getElementById('toggle-processing-btn');
+        const jwtForm = document.getElementById('jwt-form');
+        const jwtMessageDiv = document.getElementById('jwt-message');
+        const itemListDiv = document.querySelector('.item-list');
+        const noOrdersMessage = document.querySelector('.no-orders-message');
+        const marketBaseUrl = "{{ market_base_url }}";
+        const placeholderImgUrl = "{{ url_for('static', filename='images/item_placeholder.png') }}";
+
+        const helpFaqLink = document.getElementById('help-faq-link');
+        const faqModalOverlay = document.getElementById('faq-modal-overlay');
+        const faqModalCloseBtn = document.getElementById('faq-modal-close');
+        const toggleHiddenItemsBtn = document.getElementById('toggle-hidden-items-btn');
+        let marketHiddenRowsAreFilteredOut = false;
+
+        const topBarStatusDisplay = document.getElementById('current-status-display');
+        const mainProfileStatusDisplay = document.getElementById('main-profile-status-display');
+
+        // --- Place Order Modal Elements --- START ---
+        const placeOrderMainBtn = document.getElementById('place-order-main-btn');
+        const placeOrderModalOverlay = document.getElementById('place-order-modal-overlay');
+        const placeOrderModalCloseBtn = document.getElementById('place-order-modal-close-btn');
+        const placeOrderModalCancelBtn = document.getElementById('place-order-modal-cancel-btn');
+        const placeOrderForm = document.getElementById('place-order-form'); 
+        const placeOrderItemNameInput = document.getElementById('place-order-item-name');
+        const itemNamesDatalist = document.getElementById('item-names-datalist');
+        const placeOrderItemIdInput = document.getElementById('place-order-item-id');
+        const placeOrderRankInput = document.getElementById('place-order-rank');
+        const selectedItemMaxRankInfo = document.getElementById('selected-item-max-rank-info');
+        const placeOrderModalMessage = document.getElementById('place-order-modal-message'); 
+        const placeOrderSubmitBtn = document.getElementById('place-order-modal-submit-btn');
+        // --- Place Order Modal Elements --- END ---
+
+        // --- Populate Datalist for Autocomplete --- START ---
+        if (itemNamesDatalist && ITEMS_FOR_AUTOCOMPLETE && Array.isArray(ITEMS_FOR_AUTOCOMPLETE)) {
+            ITEMS_FOR_AUTOCOMPLETE.forEach(item => {
+                if (item && item.name) { 
+                    const option = document.createElement('option');
+                    option.value = item.name;
+                    option.dataset.id = item.id;
+                    option.dataset.maxRank = (item.max_rank !== null && typeof item.max_rank !== 'undefined') ? item.max_rank.toString() : '';
+                    itemNamesDatalist.appendChild(option);
+                }
+            });
+        } else {
+            console.warn("Place Order Modal: Datalist or ITEMS_FOR_AUTOCOMPLETE not found or invalid. Autocomplete may not work.");
+            if(consolePre) appendToConsole("Warning: Item list for 'Place Order' autocomplete could not be loaded.", "warn");
+        }
+        // --- Populate Datalist for Autocomplete --- END ---
+
+        // --- Handle Item Selection from Datalist & Rank Input --- START ---
+        if (placeOrderItemNameInput && itemNamesDatalist && placeOrderItemIdInput && placeOrderRankInput && selectedItemMaxRankInfo) {
+            placeOrderItemNameInput.addEventListener('input', function() {
+                const enteredValue = this.value;
+                let selectedItem = null;
+                for (let i = 0; i < itemNamesDatalist.options.length; i++) {
+                    if (itemNamesDatalist.options[i].value === enteredValue) {
+                        selectedItem = itemNamesDatalist.options[i];
+                        break;
+                    }
+                }
+                if (selectedItem) {
+                    placeOrderItemIdInput.value = selectedItem.dataset.id || '';
+                    const maxRank = selectedItem.dataset.maxRank;
+                    if (maxRank !== '') {
+                        selectedItemMaxRankInfo.textContent = `(Max Rank: ${maxRank})`;
+                        placeOrderRankInput.max = maxRank;
+                        const currentRankVal = parseInt(placeOrderRankInput.value, 10);
+                        if (!isNaN(currentRankVal) && currentRankVal > parseInt(maxRank, 10)) {
+                            placeOrderRankInput.value = maxRank;
+                        }
+                    } else { 
+                        selectedItemMaxRankInfo.textContent = '(Not a mod or rank not applicable)';
+                        placeOrderRankInput.max = ''; 
+                    }
+                } else {
+                    placeOrderItemIdInput.value = ''; 
+                    selectedItemMaxRankInfo.textContent = '';
+                    placeOrderRankInput.max = '';
+                }
+            });
+
+            placeOrderRankInput.addEventListener('input', function() {
+                const value = parseInt(this.value, 10);
+                const max = this.hasAttribute('max') && this.max !== '' ? parseInt(this.max, 10) : null;
+                const min = parseInt(this.min, 10) || 0;
+                if (this.value === '') return; 
+                if (isNaN(value)) { this.value = min; return; }
+                if (value < min) { this.value = min; }
+                else if (max !== null && value > max) { this.value = max; }
+            });
+            placeOrderRankInput.addEventListener('blur', function() {
+                if (this.value === '' && (this.min === '0' || this.min === 0) ) { this.value = '0'; }
+            });
+        }
+        // --- Handle Item Selection from Datalist & Rank Input --- END ---
+
+
+        // Initial button states
+        if (consoleToggleBtn && consoleOutputArea) {
+            if (consoleOutputArea.style.display === 'block') {
+                consoleToggleBtn.textContent = 'Hide Script Log';
+                consoleToggleBtn.classList.remove('btn-active-state');
+            } else {
+                consoleToggleBtn.textContent = 'Show Script Log';
+                consoleToggleBtn.classList.add('btn-active-state');
+            }
+        }
+        if (toggleHiddenItemsBtn) {
+            if (!marketHiddenRowsAreFilteredOut) {
+                toggleHiddenItemsBtn.textContent = 'Hide Hidden Listings';
+                toggleHiddenItemsBtn.classList.remove('btn-active-state');
+            } else {
+                toggleHiddenItemsBtn.textContent = 'Show All Listings';
+                toggleHiddenItemsBtn.classList.add('btn-active-state');
+            }
+        }
+
+        // FAQ Modal Logic
+        if (helpFaqLink && faqModalOverlay && faqModalCloseBtn) {
+            helpFaqLink.addEventListener('click', function(event) {
+                event.preventDefault();
+                faqModalOverlay.style.display = 'flex';
+            });
+            faqModalCloseBtn.addEventListener('click', function() {
+                faqModalOverlay.style.display = 'none';
+            });
+            faqModalOverlay.addEventListener('click', function(event) {
+                if (event.target === faqModalOverlay) {
+                    faqModalOverlay.style.display = 'none';
+                }
+            });
+        }
+
+        // --- Place Order Modal Toggle Logic --- START ---
+        if (placeOrderMainBtn && placeOrderModalOverlay) {
+            placeOrderMainBtn.addEventListener('click', function() {
+                if (this.hasAttribute('disabled')) { 
+                    return;
+                }
+                placeOrderModalOverlay.style.display = 'flex';
+                if (placeOrderForm) placeOrderForm.reset(); 
+                if (placeOrderItemIdInput) placeOrderItemIdInput.value = ''; 
+                if (selectedItemMaxRankInfo) selectedItemMaxRankInfo.textContent = ''; 
+                if (placeOrderRankInput) {
+                    placeOrderRankInput.max = ''; 
+                    placeOrderRankInput.value = '0'; 
+                }
+                if (placeOrderModalMessage) {
+                    placeOrderModalMessage.style.display = 'none';
+                    placeOrderModalMessage.className = ''; 
+                    placeOrderModalMessage.textContent = '';
+                }
+                if(placeOrderSubmitBtn) { 
+                    placeOrderSubmitBtn.disabled = false;
+                    placeOrderSubmitBtn.textContent = 'Submit Order';
+                }
+            });
+        }
+
+        function hidePlaceOrderModal() {
+            if (placeOrderModalOverlay) {
+                placeOrderModalOverlay.style.display = 'none';
+            }
+        }
+
+        if (placeOrderModalCloseBtn) {
+            placeOrderModalCloseBtn.addEventListener('click', hidePlaceOrderModal);
+        }
+        if (placeOrderModalCancelBtn) {
+            placeOrderModalCancelBtn.addEventListener('click', hidePlaceOrderModal);
+        }
+        if (placeOrderModalOverlay) {
+            placeOrderModalOverlay.addEventListener('click', function(event) {
+                if (event.target === placeOrderModalOverlay) { 
+                    hidePlaceOrderModal();
+                }
+            });
+        }
+        // --- Place Order Modal Toggle Logic --- END ---
+
+        // --- Place Order Form Submission --- START ---
+        if (placeOrderForm && placeOrderItemNameInput && placeOrderItemIdInput && placeOrderModalMessage && placeOrderSubmitBtn) {
+            placeOrderForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                placeOrderModalMessage.style.display = 'none'; 
+                placeOrderModalMessage.className = '';
+                placeOrderModalMessage.textContent = '';
+
+                const originalSubmitBtnText = placeOrderSubmitBtn.textContent;
+                placeOrderSubmitBtn.disabled = true;
+                placeOrderSubmitBtn.textContent = 'Submitting...';
+
+                const itemName = placeOrderItemNameInput.value.trim();
+                const itemId = placeOrderItemIdInput.value.trim();
+                const priceInput = document.getElementById('place-order-price');
+                const quantityInput = document.getElementById('place-order-quantity');
+                
+                const price = priceInput.value;
+                const quantity = quantityInput.value;
+                const rank = placeOrderRankInput.value; 
+                
+                const appMinPriceInput = document.getElementById('place-order-min-price');
+                const appSkipRepriceCheckbox = document.getElementById('place-order-skip-reprice');
+
+                const appMinPrice = appMinPriceInput.value;
+                const appSkipReprice = appSkipRepriceCheckbox.checked;
+
+                if (!itemId) { 
+                    showPlaceOrderModalMessage("Please select a valid item from the list.", false);
+                    placeOrderItemNameInput.focus();
+                    placeOrderSubmitBtn.disabled = false; placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                    return;
+                }
+                if (!price || parseInt(price, 10) <= 0) {
+                    showPlaceOrderModalMessage("Price must be a positive number.", false);
+                    priceInput.focus();
+                    placeOrderSubmitBtn.disabled = false; placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                    return;
+                }
+                if (!quantity || parseInt(quantity, 10) <= 0) {
+                    showPlaceOrderModalMessage("Quantity must be a positive number.", false);
+                    quantityInput.focus();
+                    placeOrderSubmitBtn.disabled = false; placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                    return;
+                }
+                
+                const rankVal = parseInt(rank, 10);
+                 if (rank === '' || isNaN(rankVal) || rankVal < 0) { 
+                    showPlaceOrderModalMessage("Rank must be a non-negative number (0 if not applicable).", false);
+                    placeOrderRankInput.focus();
+                    placeOrderSubmitBtn.disabled = false; placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                    return;
+                }
+                const maxRankAttr = placeOrderRankInput.getAttribute('max');
+                if (maxRankAttr && maxRankAttr !== '' && rankVal > parseInt(maxRankAttr, 10)) {
+                    showPlaceOrderModalMessage(`Rank cannot exceed the item's max rank of ${maxRankAttr}.`, false);
+                    placeOrderRankInput.focus();
+                    placeOrderSubmitBtn.disabled = false; placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                    return;
+                }
+                
+                let parsedAppMinPrice = null;
+                if (appMinPrice && appMinPrice.trim() !== '') {
+                    parsedAppMinPrice = parseInt(appMinPrice, 10);
+                    if (isNaN(parsedAppMinPrice) || parsedAppMinPrice <= 0) {
+                        showPlaceOrderModalMessage("Optional Minimum Price must be a positive number if entered.", false);
+                        appMinPriceInput.focus();
+                        placeOrderSubmitBtn.disabled = false; placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                        return;
+                    }
+                }
+
+                const orderDataPayload = {
+                    itemName: itemName, 
+                    itemId: itemId,
+                    price: parseInt(price, 10),
+                    quantity: parseInt(quantity, 10),
+                    rank: rankVal, 
+                    appMinPrice: parsedAppMinPrice, 
+                    appSkipReprice: appSkipReprice
+                };
+
+                try {
+                    const response = await fetch("{{ url_for('place_order_route') }}", {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(orderDataPayload)
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        showPlaceOrderModalMessage(result.message || "Order placed successfully!", true, true);
+                        setTimeout(() => {
+                           hidePlaceOrderModal();
+                        }, 2500);
+                    } else {
+                        showPlaceOrderModalMessage(result.message || "Failed to place order. Please check logs.", false);
+                    }
+                } catch (error) {
+                    console.error('Error submitting new order:', error);
+                    showPlaceOrderModalMessage("Network error or server issue placing order. See console.", false);
+                    appendToConsole("Client-side Error placing order: " + error, "error");
+                } finally {
+                    placeOrderSubmitBtn.disabled = false;
+                    placeOrderSubmitBtn.textContent = originalSubmitBtnText;
+                }
+            });
+        }
+
+        function showPlaceOrderModalMessage(message, isSuccess, autoHide = false) {
+            if (placeOrderModalMessage) {
+                placeOrderModalMessage.textContent = message;
+                placeOrderModalMessage.className = ''; 
+                placeOrderModalMessage.classList.add(isSuccess ? 'modal-message-success' : 'modal-message-error'); 
+                placeOrderModalMessage.style.display = 'block';
+                if (autoHide && isSuccess) { 
+                    setTimeout(() => {
+                        if(placeOrderModalMessage) placeOrderModalMessage.style.display = 'none';
+                    }, 4000);
+                }
+            }
+        }
+        // --- Place Order Form Submission --- END ---
+
+
+        // Console and Hidden Items Toggle Logic
+        if (consoleToggleBtn && consoleOutputArea) {
+             consoleToggleBtn.addEventListener('click', function() {
+                if (consoleOutputArea.style.display === 'none') {
+                    consoleOutputArea.style.display = 'block';
+                    this.textContent = 'Hide Script Log';
+                    this.classList.remove('btn-active-state');
+                } else {
+                    consoleOutputArea.style.display = 'none';
+                    this.textContent = 'Show Script Log';
+                    this.classList.add('btn-active-state');
+                }
+            });
+        }
+        if (toggleHiddenItemsBtn && itemListDiv) {
+            toggleHiddenItemsBtn.addEventListener('click', function() {
+                marketHiddenRowsAreFilteredOut = !marketHiddenRowsAreFilteredOut;
+                const itemRows = itemListDiv.querySelectorAll('.item-entry:not(.item-headers)');
+                itemRows.forEach(row => {
+                    if (row.classList.contains('item-is-actually-hidden')) {
+                        if (marketHiddenRowsAreFilteredOut) {
+                            row.classList.add('item-row-user-hidden');
+                        } else {
+                            row.classList.remove('item-row-user-hidden');
+                        }
+                    }
+                });
+                if (marketHiddenRowsAreFilteredOut) {
+                    this.textContent = 'Show All Listings';
+                    this.classList.add('btn-active-state');
+                } else {
+                    this.textContent = 'Hide Hidden Listings';
+                    this.classList.remove('btn-active-state');
+                }
+            });
+        }
+
+        // --- Socket.IO Event Handlers ---
+        const socket = io({ transports: ['websocket', 'polling'] });
+
+        socket.off('connect').on('connect', function() { appendToConsole('Connected to WFM Helper server via Socket.IO.', 'success'); });
+        socket.off('disconnect').on('disconnect', function(reason) { appendToConsole(`Disconnected from WFM Helper server. Reason: ${reason}`, 'warn'); });
+        socket.off('connect_error').on('connect_error', (err) => {
+            appendToConsole(`Socket.IO Connection Error: ${err.message}. Type: ${err.type}.`, 'error');
+            console.error("Socket connect_error full details:", err);
+        });
+
+        socket.off('new_log_message').on('new_log_message', function(update) {
+            try {
+                let rawLogMessage = update.message;
+                const messageType = update.type || 'info';
+                appendToConsole(rawLogMessage, messageType);
+
+                if (update.item_id) {
+                    const itemRow = document.getElementById(`row-item-${update.item_id}`);
+                    if (itemRow) {
+                        const statusCellTextElement = itemRow.querySelector('.item-status-cell .status-text');
+                        if (statusCellTextElement) {
+                            let statusMsgForCell = update.message;
+                            const itemMessageType = update.type || 'info';
+                            const itemName = itemRow.querySelector('.item-name-link')?.textContent || `Item ID ${update.item_id}`;
+
+                            if (itemMessageType === 'success') {
+                                if (statusMsgForCell.includes("WFM API success.")) {
+                                    statusMsgForCell = `${itemName}: Update OK.`;
+                                     const qtyMatch = update.message.match(/Qty: (\d+)/);
+                                     const visMatch = update.message.match(/Visible: (true|false)/i);
+                                     if(qtyMatch || visMatch){
+                                        let parts = [`${itemName}:`];
+                                        if(qtyMatch) parts.push(`Qty ${qtyMatch[1]}`);
+                                        if(visMatch) parts.push(`Vis ${visMatch[1].toLowerCase() === 'true' ? 'Visible' : 'Hidden'}`);
+                                        statusMsgForCell = parts.join(' ') + ".";
+                                     } else if (statusMsgForCell.toLowerCase().includes("deleted")) {
+                                        statusMsgForCell = `${itemName}: Deleted.`;
+                                     }
+                                } else if (statusMsgForCell.toLowerCase().includes("price updated") || statusMsgForCell.toLowerCase().includes("listing bumped")) {
+                                     statusMsgForCell = `${itemName}: ${statusMsgForCell}`;
+                                }
+                            } else if (!statusMsgForCell.toLowerCase().startsWith(itemName.toLowerCase()) &&
+                                       update.type !== 'orders_data_snapshot' &&
+                                       update.type !== 'settings_update_confirm' &&
+                                       !statusMsgForCell.toLowerCase().includes("error:") &&
+                                       !statusMsgForCell.toLowerCase().includes("warn:") &&
+                                       !statusMsgForCell.toLowerCase().includes("info:") &&
+                                       !statusMsgForCell.toLowerCase().includes("debug:") &&
+                                       !statusMsgForCell.toLowerCase().includes("detail:")) {
+                                statusMsgForCell = `${itemName}: ${statusMsgForCell}`;
+                            }
+
+
+                            if (statusMsgForCell.length > 100) statusMsgForCell = statusMsgForCell.substring(0,97) + "...";
+
+                            statusCellTextElement.textContent = statusMsgForCell;
+                            statusCellTextElement.className = 'status-text';
+                            if (itemMessageType === 'error') statusCellTextElement.classList.add('status-text-error');
+                            else if (itemMessageType === 'success') statusCellTextElement.classList.add('status-text-success');
+                            else if (itemMessageType === 'warn') statusCellTextElement.classList.add('status-text-checking');
+                            else if (itemMessageType === 'detail' || itemMessageType === 'info') statusCellTextElement.classList.add('status-text-info');
+                        }
+
+                        if (update.data && typeof update.data.competitor_price !== 'undefined') {
+                             const competitorPriceCell = itemRow.querySelector(`.item-competitor-price[data-item-id="${update.item_id}"]`);
+                             if (competitorPriceCell) { competitorPriceCell.textContent = update.data.competitor_price !== "N/A" ? `${update.data.competitor_price}p` : "N/A"; }
+                        }
+                         if (update.data && typeof update.data.price !== 'undefined' && (update.type === 'success' && (update.message.toLowerCase().includes("price updated") || update.message.toLowerCase().includes("listing bumped")))) {
+                            const currentPriceInput = itemRow.querySelector('.current-price-input');
+                            if (currentPriceInput) { currentPriceInput.value = update.data.price; }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("JS ERROR in new_log_message handler:", e, "Update data:", update);
+                appendToConsole("JS ERROR processing a log message from new_log_message. See browser console.", "error");
+            }
+        });
+
+        socket.off('sell_orders_snapshot').on('sell_orders_snapshot', function(data) {
+            if (!itemListDiv) { console.error("sell_orders_snapshot: itemListDiv not found, cannot update table."); return; }
+            const serverOrders = data.orders || [];
+
+            const rowsToRemove = itemListDiv.querySelectorAll('.item-entry[data-item-id]');
+            rowsToRemove.forEach(row => row.remove());
+
+            if (serverOrders.length === 0 && noOrdersMessage) { noOrdersMessage.style.display = 'block'; }
+            else if (noOrdersMessage) { noOrdersMessage.style.display = 'none'; }
+
+            serverOrders.sort((a, b) => {
+                if (a.visible && !b.visible) return -1;
+                if (!a.visible && b.visible) return 1;
+                return (a.item_name || "").toLowerCase().localeCompare((b.item_name || "").toLowerCase());
+            });
+
+            let visibleCount = 0; let totalCount = serverOrders.length;
+            serverOrders.forEach(orderData => {
+                const newRow = createItemRowElement(orderData);
+                if (newRow) {
+                    if(noOrdersMessage && noOrdersMessage.parentNode === itemListDiv) { itemListDiv.insertBefore(newRow, noOrdersMessage); }
+                    else { itemListDiv.appendChild(newRow); }
+                }
+                if (orderData.visible) { visibleCount++; }
+            });
+
+            const visibleOrdersDisplay = document.getElementById('visible-orders-count-display');
+            const totalListingsDisplay = document.getElementById('total-listings-count-display');
+            if(visibleOrdersDisplay) visibleOrdersDisplay.textContent = `${visibleCount} VISIBLE ORDERS`;
+            if(totalListingsDisplay) totalListingsDisplay.textContent = `${totalCount} TOTAL LISTINGS`;
+        });
+
+        socket.off('user_status_update').on('user_status_update', function(data) {
+            const newStatusRaw = data.new_status || "Invisible";
+            let newStatusText = "Invisible";
+
+            if (newStatusRaw && typeof newStatusRaw === 'string') {
+                const lowerStatus = newStatusRaw.toLowerCase();
+                if (lowerStatus === "online in game") newStatusText = "Online In Game";
+                else if (lowerStatus === "online") newStatusText = "Online";
+            }
+            const statusClass = newStatusText.toLowerCase().replace(/\s+/g, '-');
+            const statusElementsToUpdate = [
+                {el: topBarStatusDisplay, baseClass: 'status', name: 'topBarStatusDisplay'},
+                {el: mainProfileStatusDisplay, baseClass: 'status-large', name: 'mainProfileStatusDisplay'}
+            ];
+            statusElementsToUpdate.forEach(item => {
+                if (item.el) {
+                    item.el.textContent = newStatusText;
+                    item.el.classList.remove('online-in-game', 'online', 'invisible');
+                    item.el.classList.add(statusClass);
+                    if (!item.el.classList.contains(item.baseClass)) {
+                        item.el.classList.add(item.baseClass);
+                    }
+                } else {
+                    console.error(`Status display element '${item.name}' not found!`);
+                }
+            });
+        });
+
+
+        if (!consolePre) { console.error("CRITICAL JS: consolePre element not found!"); }
+        if (!itemListDiv) { console.error("CRITICAL JS: itemListDiv element not found!"); }
+
+        function showActionMessage(message, isSuccess) {
+            if (actionMessageArea) {
+                actionMessageArea.textContent = message;
+                actionMessageArea.style.color = isSuccess ? 'lightgreen' : 'lightcoral';
+                setTimeout(() => { actionMessageArea.textContent = ''; }, 4500);
+            } else { console.warn("JS: actionMessageArea not found"); }
+        }
+
+        function appendToConsole(message, type = 'info') {
+            if (consolePre) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                if (type === 'error') logEntry.style.color = 'lightcoral';
+                else if (type === 'success') logEntry.style.color = 'lightgreen';
+                else if (type === 'warn') logEntry.style.color = 'orange';
+                else if (type === 'detail') logEntry.style.color = '#aaa';
+                consolePre.appendChild(logEntry);
+                if(consoleOutputArea) consoleOutputArea.scrollTop = consoleOutputArea.scrollHeight;
+            } else {
+                console.log(`[${type}] (consolePre unavailable) ${message}`);
+            }
+        }
+
+        function updateSoldButtonState(rowElement, currentQuantity) {
+            const soldBtn = rowElement.querySelector('.item-action-sold');
+            if (soldBtn) {
+                soldBtn.disabled = (currentQuantity <= 1);
+            }
+        }
+
+        function handleSoldOneClick(event) {
+            const button = event.currentTarget;
+            const row = button.closest('.item-entry');
+            const orderData = gatherOrderDataFromRow(row);
+
+            if (!orderData) {
+                if (typeof appendToConsole === 'function') appendToConsole("Error: Could not gather data for Sold 1 action. Update aborted.", "error");
+                return;
+            }
+
+            if (orderData.currentQuantity <= 0) { 
+                if (typeof showActionMessage === 'function') showActionMessage("Quantity is already 1 or less. Cannot decrement further with this button.", false);
+                updateSoldButtonState(row, orderData.currentQuantity); 
+                return;
+            }
+
+            let newQuantity = orderData.currentQuantity - 1;
+            let newVisibility = orderData.currentVisibility;
+
+            if (newQuantity === 0) {
+                newVisibility = false;
+            }
+
+            const updatePayload = {
+                order_id: orderData.orderId,
+                item_id: orderData.itemId,
+                price: orderData.currentPrice,
+                quantity: newQuantity,
+                visible: newVisibility,
+                rank: orderData.currentRank,
+                action_type: 'quantity_change'
+            };
+            sendOrderUpdateRequest(updatePayload);
+        }
+
+        function handlePlusOneClick(event) {
+            const button = event.currentTarget;
+            const row = button.closest('.item-entry');
+            const orderData = gatherOrderDataFromRow(row);
+
+            if (!orderData) {
+                if (typeof appendToConsole === 'function') appendToConsole("Error: Could not gather data for +1 action. Update aborted.", "error");
+                return;
+            }
+
+            const newQuantity = orderData.currentQuantity + 1;
+
+            const updatePayload = {
+                order_id: orderData.orderId,
+                item_id: orderData.itemId,
+                price: orderData.currentPrice,
+                quantity: newQuantity,
+                visible: orderData.currentVisibility, 
+                rank: orderData.currentRank,
+                action_type: 'quantity_change'
+            };
+            sendOrderUpdateRequest(updatePayload);
+        }
+
+        function handleToggleVisibilityClick(event) {
+            const button = event.currentTarget;
+            const row = button.closest('.item-entry');
+            const orderData = gatherOrderDataFromRow(row);
+
+            if (!orderData) {
+                if (typeof appendToConsole === 'function') appendToConsole("Error: Could not gather data for visibility toggle. Update aborted.", "error");
+                return;
+            }
+
+            const currentVisibility = button.dataset.currentVisibility === 'true';
+            const newVisibility = !currentVisibility;
+
+            const updatePayload = {
+                order_id: orderData.orderId,
+                item_id: orderData.itemId,
+                price: orderData.currentPrice,
+                quantity: orderData.currentQuantity,
+                visible: newVisibility,
+                rank: orderData.currentRank,
+                action_type: 'visibility_change'
+            };
+            sendOrderUpdateRequest(updatePayload);
+        }
+
+
+        function gatherOrderDataFromRow(rowElement) {
+            if (!rowElement) {
+                console.error("gatherOrderDataFromRow: CALLED WITH NULL rowElement");
+                if (typeof appendToConsole === 'function') appendToConsole("JS CRITICAL: gatherOrderDataFromRow - rowElement is null.", "error");
+                return null;
+            }
+
+            const orderId = String(rowElement.dataset.orderId || '').trim();
+            const itemId = String(rowElement.dataset.itemId || '').trim();
+
+            if (!orderId) {
+                console.error("gatherOrderDataFromRow: Missing or empty orderId. Row dataset:", rowElement.dataset);
+                if (typeof appendToConsole === 'function') appendToConsole(`JS ERROR: Missing orderId for item ${itemId || 'Unknown'}. Update aborted.`, "error");
+                return null;
+            }
+            if (!itemId) {
+                console.error("gatherOrderDataFromRow: Missing or empty itemId. Row dataset:", rowElement.dataset);
+                if (typeof appendToConsole === 'function') appendToConsole(`JS ERROR: Missing itemId for order ${orderId}. Update aborted.`, "error");
+                return null;
+            }
+
+            const rankStr = rowElement.dataset.rank;
+            let currentRank = null;
+            if (rankStr && rankStr.trim() !== '' && rankStr !== 'N/A') {
+                const parsedRank = parseInt(rankStr, 10);
+                if (!isNaN(parsedRank)) {
+                    currentRank = parsedRank;
+                } else {
+                    console.warn(`gatherOrderDataFromRow: Rank '${rankStr}' is not a valid number for order ${orderId}. Will send as null.`);
+                }
+            }
+
+            const priceInput = rowElement.querySelector('.current-price-input');
+            const quantityInputEl = rowElement.querySelector('.quantity-input');
+            const visibilityButton = rowElement.querySelector('.item-action-toggle-visibility');
+
+
+            if (!priceInput || !quantityInputEl || !visibilityButton) {
+                console.error("gatherOrderDataFromRow: One or more required child elements (price, qty input, vis button) not found for orderId:", orderId, "itemId:", itemId);
+                if (typeof appendToConsole === 'function') appendToConsole(`JS ERROR: Missing elements in row for order ${orderId}. Update aborted.`, "error");
+                return null;
+            }
+
+            const currentPrice = parseInt(priceInput.value, 10);
+            const currentQuantity = parseInt(quantityInputEl.value, 10);
+            const currentVisibility = visibilityButton.dataset.currentVisibility === 'true';
+
+
+            if (isNaN(currentPrice)) { console.error("gatherOrderDataFromRow: currentPrice is NaN for orderId:", orderId, priceInput.value); return null;}
+            if (isNaN(currentQuantity)) { console.error("gatherOrderDataFromRow: currentQuantity is NaN for orderId:", orderId, quantityInputEl.value); return null;}
+
+            return { orderId, itemId, currentPrice, currentQuantity, currentVisibility, currentRank };
+        }
+
+        async function sendOrderUpdateRequest(updatePayload) {
+            if (!updatePayload || typeof updatePayload.item_id !== 'string' || !updatePayload.item_id.trim() || typeof updatePayload.order_id !== 'string' || !updatePayload.order_id.trim()) {
+                if (typeof appendToConsole === 'function') appendToConsole(`JS ERROR: Invalid payload for sendOrderUpdateRequest. ItemID: ${updatePayload?.item_id}, OrderID: ${updatePayload?.order_id}`, "error");
+                console.error("sendOrderUpdateRequest: Invalid payload", updatePayload);
+                return;
+            }
+            const itemNameForLog = document.getElementById(`row-item-${updatePayload.item_id}`)?.querySelector('.item-name-link')?.textContent || `Item ID ${updatePayload.item_id || 'Unknown'}`;
+
+
+            try {
+                const response = await fetch("{{ url_for('request_order_update_route') }}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatePayload)
+                });
+                const data = await response.json();
+                if (data && data.message && typeof showActionMessage === 'function') {
+                    if(data.success) {
+                        let simpleMsg = `Order for '${itemNameForLog}' updated successfully.`;
+                        if (updatePayload.action_type === 'visibility_change' && typeof updatePayload.visible !== 'undefined') {
+                            simpleMsg = `'${itemNameForLog}' visibility set to ${updatePayload.visible ? 'Visible' : 'Hidden'}.`;
+                        } else if (updatePayload.action_type === 'quantity_change' && typeof updatePayload.quantity !== 'undefined') {
+                             simpleMsg = `'${itemNameForLog}' quantity updated to ${updatePayload.quantity}.`;
+                        // MODIFIED: Added specific message for manual price change on skipped item
+                        } else if (updatePayload.action_type === 'price_change_manual_skip' && typeof updatePayload.price !== 'undefined') {
+                             simpleMsg = `'${itemNameForLog}' (skipped) price manually updated to ${updatePayload.price}p.`;
+                        }
+                        showActionMessage(simpleMsg, true);
+                    } else {
+                        showActionMessage(data.message, false);
+                    }
+                }
+            } catch (error) {
+                console.error('Error sending order update request:', error);
+                if (typeof showActionMessage === 'function') showActionMessage(`Network error updating '${itemNameForLog}'. See console.`, false);
+                if (typeof appendToConsole === 'function') appendToConsole(`Client-side error sending order update for '${itemNameForLog}': ${error}`, 'error');
+            }
+        }
+
+        async function sendDeleteOrderRequest(orderId, itemId) {
+            if (!orderId || !itemId) {
+                appendToConsole(`JS ERROR: Invalid data for sendDeleteOrderRequest. ItemID: ${itemId}, OrderID: ${orderId}`, "error");
+                return;
+            }
+            const itemNameForLog = document.getElementById(`row-item-${itemId}`)?.querySelector('.item-name-link')?.textContent || `Item ID ${itemId}`;
+
+            try {
+                const response = await fetch("{{ url_for('delete_order_route') }}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order_id: orderId, item_id: itemId })
+                });
+                const data = await response.json();
+                if (data && data.message && typeof showActionMessage === 'function') {
+                    showActionMessage(data.message, data.success);
+                }
+            } catch (error) {
+                console.error('Error sending delete order request:', error);
+                if (typeof showActionMessage === 'function') showActionMessage(`Network error deleting '${itemNameForLog}'. See console.`, false);
+                if (typeof appendToConsole === 'function') appendToConsole(`Client-side error sending delete order for '${itemNameForLog}': ${error}`, 'error');
+            }
+        }
+
+        function handleQuantityInputChange(event) {
+            const inputField = event.target;
+            const row = inputField.closest('.item-entry');
+            const orderDataForPayload = gatherOrderDataFromRow(row);
+
+            if (!orderDataForPayload) {
+                if (typeof appendToConsole === 'function') appendToConsole("Error: Could not gather data for quantity update. Update aborted.", "error");
+                return;
+            }
+
+            let newQuantity = parseInt(inputField.value, 10);
+
+            if (isNaN(newQuantity) || newQuantity < 0) {
+                if (typeof appendToConsole === 'function') appendToConsole(`Invalid quantity entered: '${inputField.value}'. Must be a non-negative number. Not updating.`, "warn");
+                if (typeof showActionMessage === 'function') showActionMessage("Invalid quantity. Please enter a non-negative number.", false);
+                const originalQuantityBeforeInvalidInput = orderDataForPayload.currentQuantity;
+                inputField.value = originalQuantityBeforeInvalidInput;
+                updateSoldButtonState(row, originalQuantityBeforeInvalidInput);
+                return;
+            }
+
+            const updatePayload = {
+                order_id: orderDataForPayload.orderId,
+                item_id: orderDataForPayload.itemId,
+                price: orderDataForPayload.currentPrice,
+                quantity: newQuantity,
+                visible: (newQuantity > 0) ? orderDataForPayload.currentVisibility : false, 
+                rank: orderDataForPayload.currentRank,
+                action_type: 'quantity_change'
+            };
+            sendOrderUpdateRequest(updatePayload);
+        }
+
+        // MODIFIED: New function to handle current price input changes for skipped items
+        function handleCurrentPriceInputChange(event) {
+            const inputField = event.target;
+            const row = inputField.closest('.item-entry');
+            if (!row) { console.error("handleCurrentPriceInputChange: Could not find parent row."); return; }
+            const itemId = row.dataset.itemId;
+            if (!itemId) { console.error("handleCurrentPriceInputChange: Row is missing data-item-id."); return; }
+            const skipCheckbox = row.querySelector(`.skip-checkbox[data-item-id="${itemId}"]`);
+
+            if (!skipCheckbox || !skipCheckbox.checked) {
+                if (!inputField.hasAttribute('readonly')) {
+                    inputField.setAttribute('readonly', 'readonly');
+                    console.warn(`Current price input for non-skipped item ${itemId} was editable. Now set to readonly.`);
+                }
+                return;
+            }
+
+            let newPrice = parseInt(inputField.value, 10);
+
+            if (isNaN(newPrice) || newPrice <= 0) {
+                const itemNameForLog = row.querySelector('.item-name-link')?.textContent || `Item ID ${itemId}`;
+                showActionMessage(`Invalid price for '${itemNameForLog}'. Must be a positive number.`, false);
+                console.warn(`Invalid price ${newPrice} entered for skipped item ${itemId}.`);
+                return; 
+            }
+
+            const orderDataForPayload = gatherOrderDataFromRow(row); 
+            if (!orderDataForPayload) {
+                appendToConsole(`Error: Could not gather data for manual price update (item ${itemId}). Update aborted.`, "error");
+                return;
+            }
+            
+            const updatePayload = {
+                order_id: orderDataForPayload.orderId,
+                item_id: orderDataForPayload.itemId,
+                price: newPrice, 
+                quantity: orderDataForPayload.currentQuantity,
+                visible: orderDataForPayload.currentVisibility,
+                rank: orderDataForPayload.currentRank,
+                action_type: 'price_change_manual_skip' 
+            };
+            sendOrderUpdateRequest(updatePayload);
+        }
+
+
+        if (consolePre) { consolePre.innerHTML = ''; }
+        else { console.error("JS: Console pre element not found on init, logs will go to browser console only.");}
+
+        if (jwtForm && jwtMessageDiv) {
+            jwtForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const jwtToken = document.getElementById('manual-jwt-input').value;
+                if (!jwtToken) {
+                    jwtMessageDiv.textContent = 'Please enter a JWT.';
+                    jwtMessageDiv.style.color = 'orange';
+                    return;
+                }
+                fetch("{{ url_for('submit_jwt_route') }}", {
+                    method: 'POST',
+                    body: new FormData(jwtForm)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    jwtMessageDiv.textContent = data.message;
+                    jwtMessageDiv.style.color = data.success ? 'lightgreen' : 'lightcoral';
+                    if (data.success) {
+                        appendToConsole('Manual JWT submitted successfully. Page will refresh via server redirect.', 'success');
+                        setTimeout(() => window.location.reload(), 1500);
+                    } else {
+                        appendToConsole(`Manual JWT submission failed: ${data.message}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error submitting JWT:', error);
+                    jwtMessageDiv.textContent = 'Error submitting JWT. See console.';
+                    jwtMessageDiv.style.color = 'lightcoral';
+                    appendToConsole(`Client-side error submitting JWT: ${error}`, 'error');
+                });
+            });
+        } else { console.warn("JS: JWT form or message div not found."); }
+
+
+        function createItemRowElement(orderData) {
+            if (!orderData || typeof orderData.item_id !== 'string' || !orderData.item_id.trim()) {
+                console.error("createItemRowElement: Invalid orderData or missing/empty item_id. Skipping row creation.", orderData);
+                appendToConsole(`JS ERROR: Skipping row creation due to invalid item_id: ${orderData ? orderData.item_id : 'N/A'}`, "error");
+                return null;
+            }
+            const itemRow = document.createElement('div');
+            itemRow.className = 'item-entry';
+            if (!orderData.visible) {
+                itemRow.classList.add('item-is-actually-hidden');
+            }
+            if (itemRow.classList.contains('item-is-actually-hidden') && marketHiddenRowsAreFilteredOut) {
+                itemRow.classList.add('item-row-user-hidden');
+            }
+
+            itemRow.id = `row-item-${orderData.item_id}`;
+            itemRow.dataset.itemId = orderData.item_id;
+            itemRow.dataset.orderId = orderData.order_id || '';
+            itemRow.dataset.rank = (orderData.rank !== null && typeof orderData.rank !== 'undefined') ? orderData.rank : '';
+
+            const initialStatusText = orderData.visible ? 'Idle' : 'HIDDEN';
+            const itemSlugSafe = orderData.item_slug || '#';
+            const rankText = (orderData.rank !== null && orderData.rank !== undefined) ? orderData.rank : 'N/A';
+            const modMaxRankText = (orderData.mod_max_rank !== null && orderData.mod_max_rank !== undefined) ? ` of ${orderData.mod_max_rank}` : '';
+            const numericMin = orderData.numeric_min_price;
+            const isSkipped = orderData.is_skipped; // This comes from the snapshot data
+            const minPriceInputValue = (numericMin !== null && typeof numericMin !== 'undefined') ? numericMin : '';
+            let minPricePlaceholderText = 'Set Min (or skip)';
+            if (isSkipped) { minPricePlaceholderText = `Skipped (${numericMin !== null ? numericMin + 'p' : 'No min'})`; }
+            const minPriceDisabled = isSkipped ? 'disabled' : '';
+            const skipChecked = isSkipped ? 'checked' : '';
+            const lastNumericValueAttr = `data-last-numeric-value="${minPriceInputValue}"`;
+
+            const currentVisibility = orderData.visible;
+            const visibilityButtonClass = currentVisibility ? 'action-btn-visible' : 'action-btn-hidden';
+            const visibilityButtonIconClass = currentVisibility ? 'fa-eye' : 'fa-eye-slash';
+            const visibilityButtonText = currentVisibility ? 'Visible' : 'Hidden';
+            const visibilityButtonTitle = currentVisibility ? 'Mark as Hidden' : 'Mark as Visible';
+
+            const soldButtonDisabled = (orderData.quantity <= 1) ? 'disabled' : '';
+            
+            // MODIFIED: Set readonly attribute for current price based on isSkipped
+            const currentPriceReadonlyAttr = isSkipped ? '' : 'readonly';
+
+            itemRow.innerHTML = `
+                <div class="item-status-cell"><span class="status-text ${!orderData.visible ? 'status-text-hidden' : ''}">${initialStatusText}</span></div>
+                <div class="item-thumbnail"><img src="${orderData.icon_url || placeholderImgUrl}" alt="${orderData.item_name}"></div>
+                <div class="item-name-details">
+                    <a href="${marketBaseUrl}/items/${itemSlugSafe}" target="_blank" class="item-name-link">${orderData.item_name}</a>
+                    <span class="item-rank">Rank: ${rankText}${modMaxRankText}</span>
+                </div>
+                <div class="item-quantity">Qty: <input type="number" value="${orderData.quantity}" class="quantity-input" data-order-id="${orderData.order_id}" data-item-id="${orderData.item_id}" min="0"></div>
+                <div class="item-price">
+                    <div><input type="number" value="${orderData.platinum}" class="price-input current-price-input" data-order-id="${orderData.order_id}" ${currentPriceReadonlyAttr}> Current Price</div>
+                    <div>
+                        <input type="text" value="${minPriceInputValue}" placeholder="${minPricePlaceholderText}" class="price-input min-price-input" data-item-id="${orderData.item_id}" ${lastNumericValueAttr} ${minPriceDisabled}> Minimum Price
+                    </div>
+                </div>
+                <div class="item-competitor-price" data-item-id="${orderData.item_id}">N/A</div>
+                <div class="item-actions">
+                    <button class="action-btn item-action-sold" data-order-id="${orderData.order_id}" data-item-id="${orderData.item_id}" title="Decrement Quantity by 1" ${soldButtonDisabled}><i class="fas fa-minus-circle"></i> Sold 1</button>
+                    <button class="action-btn item-action-plus-one" data-order-id="${orderData.order_id}" data-item-id="${orderData.item_id}" title="Increment Quantity by 1"><i class="fas fa-plus-circle"></i> +1</button>
+                    <button class="action-btn ${visibilityButtonClass} item-action-toggle-visibility" data-order-id="${orderData.order_id}" data-item-id="${orderData.item_id}" data-current-visibility="${currentVisibility}" title="${visibilityButtonTitle}"><i class="fas ${visibilityButtonIconClass}"></i> ${visibilityButtonText}</button>
+                    <label class="skip-label" title="Skip auto-repricing">Skip: <input type="checkbox" class="skip-checkbox" data-item-id="${orderData.item_id}" ${skipChecked}></label>
+                </div>
+            `;
+            attachListenersToNewRowElements(itemRow);
+            return itemRow;
+        }
+
+        if (toggleProcessingBtn) {
+            toggleProcessingBtn.addEventListener('click', function() {
+                const currentButton = this; const isActive = currentButton.getAttribute('data-processing-active') === 'true';
+                const actionUrl = isActive ? "{{ url_for('stop_processing_route') }}" : "{{ url_for('start_processing_route') }}";
+                const busyButtonText = isActive ? 'Stopping...' : 'Starting...';
+                currentButton.disabled = true; currentButton.textContent = busyButtonText;
+                fetch(actionUrl, { method: 'POST' })
+                .then(response => response.json().then(data => ({ status: response.status, ok: response.ok, data }) ))
+                .then(({ status, ok, data }) => {
+                    showActionMessage(data.message, data.success);
+                    if (data.success) {
+                        if (!isActive) { currentButton.textContent = 'Stop Processing'; currentButton.setAttribute('data-processing-active', 'true'); }
+                        else { currentButton.textContent = 'Start Processing'; currentButton.setAttribute('data-processing-active', 'false'); }
+                    } else {
+                        if (!isActive) { currentButton.textContent = 'Start Processing'; currentButton.setAttribute('data-processing-active', 'false');}
+                        else { currentButton.textContent = 'Stop Processing'; currentButton.setAttribute('data-processing-active', 'true'); }
+                    }
+                }).catch(error => {
+                    console.error('Error toggling processing:', error);
+                    showActionMessage('Network error toggling processing. See console.', false);
+                    appendToConsole('Fetch error toggling processing: ' + error, 'error');
+                    if (!isActive) { currentButton.textContent = 'Start Processing'; currentButton.setAttribute('data-processing-active', 'false'); }
+                    else { currentButton.textContent = 'Stop Processing'; currentButton.setAttribute('data-processing-active', 'true'); }
+                }).finally(() => { currentButton.disabled = false; });
+            });
+        } else { console.warn("JS: toggleProcessingBtn not found."); }
+
+        function handleMinPriceChange() {
+            const itemId = this.dataset.itemId;
+            if (!itemId || itemId.trim() === "") { console.warn("MinPriceChange: Invalid itemId on input", this); return; }
+            let newRawValue = this.value.trim();
+            const itemRow = this.closest('.item-entry');
+            const skipCheckbox = itemRow ? itemRow.querySelector(`.skip-checkbox[data-item-id="${itemId}"]`) : null;
+            let payload = { item_id: itemId };
+            let newNumericMin = null;
+            let newSkippedStatus = false;
+
+            if (newRawValue.toLowerCase() === 'skip') {
+                newSkippedStatus = true;
+                newNumericMin = this.dataset.lastNumericValue ? parseInt(this.dataset.lastNumericValue, 10) : null;
+                if (isNaN(newNumericMin)) newNumericMin = null;
+                this.value = '';
+            } else if (newRawValue === "") {
+                newNumericMin = null;
+            } else {
+                const parsedNum = parseInt(newRawValue, 10);
+                if (!isNaN(parsedNum) && parsedNum > 0) {
+                    newNumericMin = parsedNum;
+                } else {
+                    showActionMessage(`Min price for '${itemRow?.querySelector('.item-name-link')?.textContent || `Item ID ${itemId}`}' must be a positive number or 'skip'. Reverting.`, false);
+                    this.value = this.dataset.lastNumericValue || "";
+                    return;
+                }
+            }
+            payload.numeric_min = newNumericMin;
+            payload.skipped = newSkippedStatus; 
+            if(skipCheckbox && skipCheckbox.checked && newRawValue.toLowerCase() !== 'skip'){
+                 payload.skipped = true;
+            }
+
+            fetchMinPriceUpdate(itemId, payload, this, skipCheckbox);
+        }
+
+        function handleSkipChange() {
+            const itemId = this.dataset.itemId;
+            if (!itemId || itemId.trim() === "") { console.warn("SkipChange: Invalid itemId on checkbox", this); return; }
+            const isCheckingSkip = this.checked;
+            const itemRow = this.closest('.item-entry');
+            const minPriceInput = itemRow ? itemRow.querySelector(`.min-price-input[data-item-id="${itemId}"]`) : null;
+            let payload = { item_id: itemId, skipped: isCheckingSkip };
+            let currentNumericValue = null;
+
+            if (minPriceInput) {
+                if (isCheckingSkip) { 
+                    minPriceInput.dataset.lastNumericValue = minPriceInput.value.trim(); 
+                    currentNumericValue = minPriceInput.value.trim() !== "" && !isNaN(parseInt(minPriceInput.value.trim(), 10)) && parseInt(minPriceInput.value.trim(), 10) > 0
+                                        ? parseInt(minPriceInput.value.trim(), 10)
+                                        : (minPriceInput.dataset.lastNumericValue && !isNaN(parseInt(minPriceInput.dataset.lastNumericValue,10)) ? parseInt(minPriceInput.dataset.lastNumericValue,10) : null);
+
+                } else { 
+                    currentNumericValue = minPriceInput.dataset.lastNumericValue && minPriceInput.dataset.lastNumericValue.trim() !== "" && !isNaN(parseInt(minPriceInput.dataset.lastNumericValue.trim(), 10))
+                                        ? parseInt(minPriceInput.dataset.lastNumericValue.trim(), 10)
+                                        : null;
+                }
+                payload.numeric_min = currentNumericValue;
+            }
+            fetchMinPriceUpdate(itemId, payload, minPriceInput, this);
+        }
+
+
+        function fetchMinPriceUpdate(itemId, payload, minPriceInputElement, skipCheckboxElement) {
+            const itemRowForName = minPriceInputElement ? minPriceInputElement.closest('.item-entry') : (skipCheckboxElement ? skipCheckboxElement.closest('.item-entry') : document.getElementById(`row-item-${itemId}`));
+            const itemName = itemRowForName ? (itemRowForName.querySelector('.item-name-link')?.textContent || `Item ID ${itemId}`) : `Item ID ${itemId}`;
+
+            if (typeof payload.numeric_min === 'undefined') {
+                 const lastVal = minPriceInputElement ? minPriceInputElement.dataset.lastNumericValue : null;
+                 payload.numeric_min = lastVal && !isNaN(parseInt(lastVal,10)) ? parseInt(lastVal,10) : null;
+            }
+            if (typeof payload.skipped === 'undefined') {
+                payload.skipped = skipCheckboxElement ? skipCheckboxElement.checked : false;
+            }
+
+            fetch("{{ url_for('update_min_price_route') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                showActionMessage(data.message, data.success);
+                if (data.success && data.itemId === itemId) { 
+                    const confirmedNumericMin = data.new_numeric_min;
+                    const confirmedSkippedStatus = data.new_skipped_status;
+                    
+                    const currentRow = document.getElementById(`row-item-${itemId}`); 
+                    if (!currentRow) {
+                        console.error(`WorkspaceMinPriceUpdate: Could not find row with ID row-item-${itemId} after update.`);
+                        return;
+                    }
+                    const minPriceInputActual = currentRow.querySelector('.min-price-input');
+                    const skipCheckboxActual = currentRow.querySelector('.skip-checkbox');
+                    const currentPriceActualInput = currentRow.querySelector('.current-price-input'); // Get current price input
+
+                    if (minPriceInputActual) {
+                        minPriceInputActual.disabled = confirmedSkippedStatus; 
+                        minPriceInputActual.value = (confirmedNumericMin !== null && typeof confirmedNumericMin !== 'undefined') ? confirmedNumericMin.toString() : '';
+                        minPriceInputActual.dataset.lastNumericValue = (confirmedNumericMin !== null && typeof confirmedNumericMin !== 'undefined') ? confirmedNumericMin.toString() : '';
+                        minPriceInputActual.placeholder = confirmedSkippedStatus ? `Skipped (${confirmedNumericMin !== null ? confirmedNumericMin + 'p' : 'No min'})` : "Set Min (or skip)";
+                    }
+                    if (skipCheckboxActual) { 
+                        skipCheckboxActual.checked = confirmedSkippedStatus; 
+                    }
+                    // MODIFIED: Update readonly attribute of current-price-input
+                    if (currentPriceActualInput) {
+                        if (confirmedSkippedStatus) {
+                            currentPriceActualInput.removeAttribute('readonly');
+                        } else {
+                            currentPriceActualInput.setAttribute('readonly', 'readonly');
+                        }
+                    }
+                } else if (!data.success) { 
+                    console.warn("Update min price failed for", itemName, "Backend message:", data.message); 
+                }
+            }).catch(error => {
+                console.error('Error updating item setting:', error);
+                showActionMessage(`Error updating for '${itemName}'. See browser console.`, false);
+                appendToConsole(`Client-side error updating item setting for '${itemName}': ${error}`, 'error');
+            });
+        }
+
+
+        function attachListenersToNewRowElements(rowElement) {
+            const minPriceInput = rowElement.querySelector('.min-price-input');
+            if (minPriceInput) { minPriceInput.addEventListener('change', handleMinPriceChange); }
+            else { console.warn("JS WARN: attachListeners - minPriceInput not found in row:", rowElement.dataset.itemId); }
+
+            const skipCheckbox = rowElement.querySelector('.skip-checkbox');
+            if (skipCheckbox) { skipCheckbox.addEventListener('change', handleSkipChange); }
+            else { console.warn("JS WARN: attachListeners - skipCheckbox not found in row:", rowElement.dataset.itemId); }
+
+            const quantityInput = rowElement.querySelector('.quantity-input');
+            if (quantityInput) {
+                quantityInput.addEventListener('change', handleQuantityInputChange); // MODIFIED from blur to change
+            } else {
+                console.warn("JS WARN: attachListeners - quantityInput not found for item:", rowElement.dataset.itemId, "in row", rowElement);
+            }
+
+            const plusOneBtn = rowElement.querySelector('.item-action-plus-one');
+            if (plusOneBtn) {
+                plusOneBtn.addEventListener('click', handlePlusOneClick);
+            } else {
+                console.warn("JS WARN: attachListeners - item-action-plus-one button not found for item:", rowElement.dataset.itemId);
+            }
+
+            const soldBtn = rowElement.querySelector('.item-action-sold');
+            if (soldBtn) {
+                soldBtn.addEventListener('click', handleSoldOneClick);
+            } else {
+                console.warn("JS WARN: attachListeners - item-action-sold button not found for item:", rowElement.dataset.itemId);
+            }
+
+            const toggleVisibilityBtn = rowElement.querySelector('.item-action-toggle-visibility');
+            if (toggleVisibilityBtn) {
+                toggleVisibilityBtn.addEventListener('click', handleToggleVisibilityClick);
+            } else {
+                console.warn("JS WARN: attachListeners - item-action-toggle-visibility button not found for item:", rowElement.dataset.itemId);
+            }
+
+            // MODIFIED: Add listener for current price input
+            const currentPriceInput = rowElement.querySelector('.current-price-input');
+            if (currentPriceInput) {
+                currentPriceInput.addEventListener('change', handleCurrentPriceInputChange);
+            } else { console.warn("JS WARN: attachListeners - current-price-input not found for item:", rowElement.dataset.itemId); }
+        }
+
+        if (itemListDiv) {
+            const initialRows = itemListDiv.querySelectorAll('.item-list .item-entry[data-item-id]');
+            initialRows.forEach(row => {
+                attachListenersToNewRowElements(row);
+            });
+        } else { console.error("JS: Cannot attach initial listeners: itemListDiv not found."); }
+
+        // MODIFIED: Updated version log for clarity
+        appendToConsole("WFM Helper UI Initialized (v14.2 - Editable Skipped Price).", "info");
+        console.log("WFM Helper UI Initialized (v14.2 - Editable Skipped Price). Full script evaluation complete.");
+
+    }); // End DOMContentLoaded
+    </script>
+</body>
+</html>

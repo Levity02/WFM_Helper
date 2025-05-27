@@ -1,0 +1,48 @@
+{
+    "user_id": "65d4df1d570272000a73a0bc",
+    "loop_delay_seconds": 10,
+    "bump_threshold_cycles": 5,
+    "device_id": "89900314-7732-465a-8089-32e439905852",
+    "item_price_settings": {
+        "5f498a229426ed00443bd0b2": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "66fd692b3a826eccf651cd59": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "54e644ffe779897594fa68d2": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "66fd69223a826eccf651cd57": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "66fd69423a826eccf651cd5d": {
+            "numeric_min": 99,
+            "skipped": false
+        },
+        "54a74455e779892d5e5156cc": {
+            "numeric_min": null,
+            "skipped": true
+        },
+        "54e644ffe779897594fa68d3": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "60e5b9004794450053e9995d": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "66fd6a303a826eccf651cd75": {
+            "numeric_min": 10,
+            "skipped": false
+        },
+        "66fd67d13a826eccf651cd4d": {
+            "numeric_min": 10,
+            "skipped": false
+        }
+    }
+}
